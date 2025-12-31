@@ -3,7 +3,38 @@
 #include <Windows.h>
 
 FileManager::FileManager() {
-	working_path = "D:/";
+	std::string system_drive = "C:\\";
+	char* pValue = nullptr;
+	size_t len = 0;
+	_dupenv_s(&pValue, &len, "SystemDrive");
+	if (pValue != nullptr) {
+		system_drive = std::string(pValue) + "\\";
+		free(pValue); // Musimy rêcznie zwolniæ pamiêæ zarezerwowan¹ przez _dupenv_s!
+	}
+	std::vector<std::string> available_drives;
+	unsigned long maska = GetLogicalDrives();
+
+	for (int i = 0; i < 26; ++i) {
+		if (maska & (1 << i)) {
+			std::string sciezka = std::string(1, 'A' + i) + ":\\";
+			if (GetDriveTypeA(sciezka.c_str()) == DRIVE_FIXED) {
+				available_drives.push_back(sciezka);
+			}
+		}
+	}
+
+	std::string default_drive = system_drive; // Zak³adamy domyœlnie systemowy
+
+	for (const auto& d : available_drives) {
+		if (d != system_drive) {
+			default_drive = d;
+			break; // ZnaleŸliœmy inny dysk, koñczymy szukanie!
+		}
+	}
+
+	// Teraz przypisujemy wynik do œcie¿ki roboczej Managera
+	this->working_path = default_drive;
+
 	OpenFolder(working_path.string());
 }
 
