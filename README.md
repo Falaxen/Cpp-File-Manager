@@ -1,2 +1,2 @@
 # Cpp-File-Manager
-Prosty, póki co konsolowy menedżer plików
+Simple, C++ based file manager, versions with or without GUI (GUI version needs QT installed).
