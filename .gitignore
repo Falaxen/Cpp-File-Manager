@@ -1,0 +1,7 @@
+[Dd]ebug/
+[Rr]elease/
+x64/
+[Aa]rm64/
+.vs/
+Debug/
+Release/
