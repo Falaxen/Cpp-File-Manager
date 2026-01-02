@@ -9,7 +9,7 @@ FileManager::FileManager() {
 	_dupenv_s(&pValue, &len, "SystemDrive");
 	if (pValue != nullptr) {
 		system_drive = std::string(pValue) + "\\";
-		free(pValue); // Musimy rêcznie zwolniæ pamiêæ zarezerwowan¹ przez _dupenv_s!
+		free(pValue);
 	}
 	std::vector<std::string> available_drives;
 	unsigned long maska = GetLogicalDrives();
@@ -23,16 +23,15 @@ FileManager::FileManager() {
 		}
 	}
 
-	std::string default_drive = system_drive; // Zak³adamy domyœlnie systemowy
+	std::string default_drive = system_drive;
 
 	for (const auto& d : available_drives) {
 		if (d != system_drive) {
 			default_drive = d;
-			break; // ZnaleŸliœmy inny dysk, koñczymy szukanie!
+			break;
 		}
 	}
 
-	// Teraz przypisujemy wynik do œcie¿ki roboczej Managera
 	this->working_path = default_drive;
 
 	OpenFolder(working_path.string());
@@ -131,44 +130,138 @@ void FileManager::CreateNewFolder(std::string name) {
 	}
 }
 
-void FileManager::SearchRecursive(std::string name, fs::path starting_path) {
-	try {
-		for (auto entry : fs::directory_iterator(starting_path)) {
-			if (entry.path().filename() == name) {
-				std::cout << "Znaleziono plik: " << name << "\nSciezka do pliku: " << entry.path() << "\n";
-				OpenFolder(entry.path().parent_path().string());
-				Execute(entry.path());
-				return;
+void FileManager::SearchRecursive(std::string name, fs::path starting_path, std::vector<fs::path>& found_paths) {
+	std::error_code ec;
+	auto it = fs::directory_iterator(starting_path, ec);
+
+	if (ec) return;
+
+	while (it != fs::directory_iterator()) {
+		std::error_code ec_loop;
+
+		try {
+			fs::path current_path = it->path();
+			std::string current_filename = current_path.filename().string();
+
+			if (current_filename.find(name) != std::string::npos) {
+				found_paths.push_back(current_path);
 			}
-			else if (entry.is_directory() == true) {
-				SearchRecursive(name, entry.path());
+
+			std::error_code ec_dir;
+			fs::file_status s = fs::symlink_status(current_path, ec_dir);
+
+			bool is_dir = (!ec_dir && fs::is_directory(s));
+
+			it.increment(ec_loop);
+
+			if (is_dir) {
+				SearchRecursive(name, current_path, found_paths);
 			}
 		}
-	}
-	catch(fs::filesystem_error& e){
-		std::cout << "ERROR: " << e.what() << "\n";
-		return;
+		catch (...) {
+			it.increment(ec_loop);
+		}
+
+		if (ec_loop) break;
 	}
 }
 
 void FileManager::Search(std::string name) {
+	std::vector<fs::path> found_paths;
+	std::vector<std::unique_ptr<Element>> found_elements;
 	std::cout << "Szukam " << name << " w " << working_path << "... \n";
-	SearchRecursive(name, working_path);
+	SearchRecursive(name, working_path, found_paths);
+
+	if (found_paths.empty()) {
+		std::cout << "Nie znaleziono zadnych wynikow.\n";
+		return;
+	}
+
+	for (const auto& p : found_paths) {
+		std::error_code ec;
+		if (fs::is_directory(p, ec)) {
+			found_elements.push_back(std::make_unique<Katalog>(p));
+		}
+		else {
+			found_elements.push_back(std::make_unique<Plik>(p));
+		}
+	}
+
+	for (int i = 0; i < found_elements.size(); i++) {
+		std::cout << "[" << i + 1 << "] ";
+		found_elements[i]->Show_info();
+	}
+	int choice;
+	std::cout << "Wybierz szukany plik/folder \n";
+	std::cin >> choice;
+	if (choice >= 1 && choice <= found_elements.size()) {
+		Execute(found_elements[choice - 1]->Get_path());
+	}
+	else {
+		std::cout << "Nieprawidlowy numer wyboru!\n";
+	}
 }
 
 void FileManager::SearchByFunction(std::string name) {
-	for (const auto& entry : fs::recursive_directory_iterator(working_path, fs::directory_options::skip_permission_denied)) {
-		if (entry.path().filename() == name) {
-			std::cout << "Znaleziono plik: " << name << "\nSciezka do pliku: " << entry.path() << "\n";
-			OpenFolder(entry.path().parent_path().string());
-			Execute(entry.path());
+	std::vector<std::unique_ptr<Element>> found_elements;
+	try {
+		std::error_code ec;
+		for (auto it = fs::recursive_directory_iterator(working_path, fs::directory_options::skip_permission_denied, ec);
+			it != fs::recursive_directory_iterator();
+			it.increment(ec)) {
+
+			if (ec) {
+				std::cerr << "B³¹d dostêpu: " << ec.message() << std::endl;
+				ec.clear();
+				continue;
+			}
+
+			try {
+				const auto& entry = *it;
+				std::string filename = entry.path().filename().string();
+
+				if (filename.find(name) != std::string::npos) {
+					if (entry.is_directory()) {
+						found_elements.push_back(std::make_unique<Katalog>(entry.path()));
+					}
+					else if (entry.is_regular_file()) {
+						found_elements.push_back(std::make_unique<Plik>(entry.path()));
+					}
+				}
+			}
+			catch (const std::exception& e) {
+				continue;
+			}
 		}
+	}
+	catch (fs::filesystem_error& e) {
+		std::cout << "ERROR: " << e.what() << "\n";
+		return;
+	}
+
+	if (found_elements.empty()) {
+		std::cout << "Nie znaleziono zadnych wynikow.\n";
+		return;
+	}
+
+	for (int i = 0; i < found_elements.size(); i++) {
+		std::cout << "[" << i + 1 << "] ";
+		found_elements[i]->Show_info();
+	}
+	int choice;
+	std::cout << "Wybierz szukany plik/folder \n";
+	std::cin >> choice;
+	if (choice >= 1 && choice <= found_elements.size()) {
+		Execute(found_elements[choice - 1]->Get_path());
+	}
+	else {
+		std::cout << "Nieprawidlowy numer wyboru!\n";
 	}
 }
 
 void FileManager::Execute(fs::path file_path) {
 	int wybor  = 2;
-	std::cout << "Co chcesz zrobiæ? :\n";
+	std::cout << "Co chcesz zrobic? :\n";
 	std::cout << "1. Uruchomic plik \n";
 	std::cout << "2. Otworzyc eksplorator plikow \n";
 	std::cin >> wybor;
@@ -190,7 +283,7 @@ void FileManager::FastSwitchFolder() {
 	ShowContents();
 	std::cout << "Gdzie chcesz przejsc? \n";
 	std::cout << "Folder  wyzej -> .. | Folder nizej -> nazwa \n";
-	std::cin >> dwa;
+	std::getline(std::cin, dwa);
 	std::cin.ignore();
 	if (dwa == "..") {
 		working_path = working_path.parent_path();
@@ -208,6 +301,8 @@ void FileManager::FastSwitchFolder() {
 			OpenFolder(working_path.string());
 		}
 		catch (fs::filesystem_error& e) {
+			std::cout << "ERROR: " << e.what() << "\n";
+			return;
 		}
 	}
 }
@@ -228,7 +323,7 @@ void FileManager::FastSwitchFolderDown() {
 	ShowContents();
 	std::cout << "Gdzie chcesz przejsc? \n";
 	std::cout << "Folder  wyzej -> .. | Folder nizej -> nazwa \n";
-	std::cin >> dwa;
+	std::getline(std::cin, dwa);
 	std::cin.ignore();
 	working_path = working_path / dwa;
 	try {

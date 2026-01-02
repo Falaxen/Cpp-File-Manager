@@ -23,7 +23,7 @@ public:
 	void DeleteElement(std::string name);
 	void CreateNewFile(std::string name);
 	void CreateNewFolder(std::string name);
-	void SearchRecursive(std::string name, fs::path starting_path);
+	void SearchRecursive(std::string name, fs::path starting_path, std::vector<fs::path>& found_paths);
 	void Search(std::string name);
 	void SearchByFunction(std::string name);
 	void Execute(fs::path file_path);
